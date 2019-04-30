@@ -34,7 +34,7 @@ class MsImageDis(nn.Module):
         self.num_scales = params['num_scales']
         self.pad_type = params['pad_type']
         self.input_dim = input_dim
-        self.downsample = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
+        self.downsample = nn.AvgPool3d(3, stride=2, padding=[1, 1], count_include_pad=False)
         self.cnns = nn.ModuleList()
         for _ in range(self.num_scales):
             self.cnns.append(self._make_net())
@@ -46,7 +46,7 @@ class MsImageDis(nn.Module):
         for i in range(self.n_layer - 1):
             cnn_x += [Conv3dBlock(dim, dim * 2, 4, 2, 1, norm=self.norm, activation=self.activ, pad_type=self.pad_type)]
             dim *= 2
-        cnn_x += [nn.Conv2d(dim, 1, 1, 1, 0)]
+        cnn_x += [nn.Conv3d(dim, 1, 1, 1, 0)]
         cnn_x = nn.Sequential(*cnn_x)
         return cnn_x
 
@@ -106,7 +106,7 @@ class AdaINGen(nn.Module):
         mlp_dim = params['mlp_dim']
 
         # style encoder
-        self.enc_style = StyleEncoder(4, input_dim, dim, style_dim, norm='none', activ=activ, pad_type=pad_type)
+        self.enc_style = StyleEncoder(3, input_dim, dim, style_dim, norm='none', activ=activ, pad_type=pad_type)
 
         # content encoder
         self.enc_content = ContentEncoder(n_downsample, n_res, input_dim, dim, 'in', activ, pad_type=pad_type)
@@ -137,7 +137,7 @@ class AdaINGen(nn.Module):
     def assign_adain_params(self, adain_params, model):
         # assign the adain_params to the AdaIN layers in model
         for m in model.modules():
-            if m.__class__.__name__ == "AdaptiveInstanceNorm2d":
+            if m.__class__.__name__ == "AdaptiveInstanceNorm3d":
                 mean = adain_params[:, :m.num_features]
                 std = adain_params[:, m.num_features:2*m.num_features]
                 m.bias = mean.contiguous().view(-1)
@@ -149,7 +149,7 @@ class AdaINGen(nn.Module):
         # return the number of AdaIN parameters needed by the model
         num_adain_params = 0
         for m in model.modules():
-            if m.__class__.__name__ == "AdaptiveInstanceNorm2d":
+            if m.__class__.__name__ == "AdaptiveInstanceNorm3d":
                 num_adain_params += 2*m.num_features
         return num_adain_params
 
@@ -202,8 +202,8 @@ class StyleEncoder(nn.Module):
             dim *= 2
         for i in range(n_downsample - 2):
             self.model += [Conv3dBlock(dim, dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
-        self.model += [nn.AdaptiveAvgPool2d(1)] # global average pooling
-        self.model += [nn.Conv2d(dim, style_dim, 1, 1, 0)]
+        self.model += [nn.AdaptiveAvgPool3d(1)] # global average pooling
+        self.model += [nn.Conv3d(dim, style_dim, 1, 1, 0)]
         self.model = nn.Sequential(*self.model)
         self.output_dim = dim
 
@@ -217,8 +217,8 @@ class ContentEncoder(nn.Module):
         self.model += [Conv3dBlock(input_dim, dim, 7, 1, 3, norm=norm, activation=activ, pad_type=pad_type)]
         # downsampling blocks
         for i in range(n_downsample):
-            self.model += [Conv3dBlock(dim, 2 * dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
-            dim *= 2
+            self.model += [Conv3dBlock(dim, dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+
         # residual blocks
         self.model += [ResBlocks(n_res, dim, norm=norm, activation=activ, pad_type=pad_type)]
         self.model = nn.Sequential(*self.model)
@@ -298,21 +298,15 @@ class Conv3dBlock(nn.Module):
         super(Conv3dBlock, self).__init__()
         self.use_bias = True
         # initialize padding
-        if pad_type == 'reflect':
-            self.pad = nn.ReplicationPad3d(padding)
-        elif pad_type == 'replicate':
-            self.pad = nn.ReplicationPad3d(padding)
-        elif pad_type == 'zero':
-            self.pad = nn.ReplicationPad3d(padding)
-        else:
-            assert 0, "Unsupported padding type: {}".format(pad_type)
+        self.pad = nn.ConstantPad3d(padding,0)
+
 
         # initialize normalization
         norm_dim = output_dim
         if norm == 'bn':
             self.norm = nn.BatchNorm3d(norm_dim)
         elif norm == 'in':
-            #self.norm = nn.InstanceNorm2d(norm_dim, track_running_stats=True)
+
             self.norm = nn.InstanceNorm3d(norm_dim)
         elif norm == 'ln':
             self.norm = LayerNorm(norm_dim)
@@ -432,18 +426,18 @@ class Vgg16(nn.Module):
         h = F.relu(self.conv1_1(X), inplace=True)
         h = F.relu(self.conv1_2(h), inplace=True)
         # relu1_2 = h
-        h = F.max_pool2d(h, kernel_size=2, stride=2)
+        h = F.max_pool3d(h, kernel_size=2, stride=2)
 
         h = F.relu(self.conv2_1(h), inplace=True)
         h = F.relu(self.conv2_2(h), inplace=True)
         # relu2_2 = h
-        h = F.max_pool2d(h, kernel_size=2, stride=2)
+        h = F.max_pool3d(h, kernel_size=2, stride=2)
 
         h = F.relu(self.conv3_1(h), inplace=True)
         h = F.relu(self.conv3_2(h), inplace=True)
         h = F.relu(self.conv3_3(h), inplace=True)
         # relu3_3 = h
-        h = F.max_pool2d(h, kernel_size=2, stride=2)
+        h = F.max_pool3d(h, kernel_size=2, stride=2)
 
         h = F.relu(self.conv4_1(h), inplace=True)
         h = F.relu(self.conv4_2(h), inplace=True)
@@ -474,20 +468,20 @@ class AdaptiveInstanceNorm3d(nn.Module):
         self.register_buffer('running_mean', torch.zeros(num_features))
         self.register_buffer('running_var', torch.ones(num_features))
 
-    def forward(self, x):##TODO:not test yet
+    def forward(self, x):
         assert self.weight is not None and self.bias is not None, "Please assign weight and bias before calling AdaIN!"
-        b, c ,d= x.size(0), x.size(1),x.size(2)
+        b, c= x.size(0), x.size(1)
         running_mean = self.running_mean.repeat(b)
         running_var = self.running_var.repeat(b)
 
         # Apply instance norm
-        x_reshaped = x.contiguous().view(1, b * c*d, *x.size()[2:])
+        x_reshaped = x.contiguous().view(1, b * c, *x.size()[2:])
 
         out = F.batch_norm(
             x_reshaped, running_mean, running_var, self.weight, self.bias,
             True, self.momentum, self.eps)
 
-        return out.view(b, c,d, *x.size()[2:])
+        return out.view(b, c, *x.size()[2:])
 
     def __repr__(self):
         return self.__class__.__name__ + '(' + str(self.num_features) + ')'
@@ -585,3 +579,22 @@ class SpectralNorm(nn.Module):
     def forward(self, *args):
         self._update_u_v()
         return self.module.forward(*args)
+
+def test_net():
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES']='2'
+    params=dict()
+    params['dim']=64
+    params['mlp_dim']=256
+    params['style_dim']=8
+    params['activ']='relu'
+    params['n_downsample']=2
+    params['n_res']=4
+    params['pad_type']='reflect'
+    s_a = torch.randn(1, 8, 1, 1).cuda()
+    gen_a = AdaINGen(1, params).cuda()
+    gen_a.eval()
+    x_a = torch.Tensor(1,1,32,256,256).cuda()
+    s_a = Variable(s_a)
+    c_a, s_a_fake = gen_a.encode(x_a)
+    x_ba = gen_a.decode(c_a, s_a)
