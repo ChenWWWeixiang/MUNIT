@@ -10,6 +10,13 @@ try:
     from itertools import izip as zip
 except ImportError: # will be 3.x series
     pass
+##################################################################################
+# Register
+##################################################################################
+class LatentRegister(nn.Module):##TODO
+    def __init__(self):
+        super(LatentRegister, self).__init__()
+
 
 ##################################################################################
 # Discriminator
@@ -392,6 +399,10 @@ class LinearBlock(nn.Module):
         if self.activation:
             out = self.activation(out)
         return out
+
+class TransformLayer(nn.Module):##TODO
+    def __init__(self):
+        super(TransformLayer,self).__init__()
 
 ##################################################################################
 # VGG network definition

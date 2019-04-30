@@ -132,10 +132,10 @@ class MUNIT_Trainer(nn.Module):
         for i in range(x_a.size(0)):
             c_a, s_a_fake = self.gen_a.encode(x_a[i].unsqueeze(0))
             c_b, s_b_fake = self.gen_b.encode(x_b[i].unsqueeze(0))
-            x_a_recon.append(self.gen_a.decode(c_a, s_a_fake))
-            x_b_recon.append(self.gen_b.decode(c_b, s_b_fake))
-            x_ba1.append(self.gen_a.decode(c_b, s_a1[i].unsqueeze(0)))
-            x_ba2.append(self.gen_a.decode(c_b, s_a2[i].unsqueeze(0)))
+            x_a_recon.append(self.gen_a.decode(c_a, s_a_fake))#a self
+            x_b_recon.append(self.gen_b.decode(c_b, s_b_fake))#b self
+            x_ba1.append(self.gen_a.decode(c_b, s_a1[i].unsqueeze(0)))# ramdon a
+            x_ba2.append(self.gen_a.decode(c_b, s_a2[i].unsqueeze(0)))# ramdon a2
             x_ab1.append(self.gen_b.decode(c_a, s_b1[i].unsqueeze(0)))
             x_ab2.append(self.gen_b.decode(c_a, s_b2[i].unsqueeze(0)))
         x_a_recon, x_b_recon = torch.cat(x_a_recon), torch.cat(x_b_recon)
