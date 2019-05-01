@@ -72,8 +72,9 @@ while True:
             print("Iteration: %08d/%08d" % (iterations + 1, max_iter))
             write_loss(iterations, trainer, train_writer)
 
+
         # Write images
-        if (iterations + 1) % config['image_save_iter'] == 0:
+        if (iterations + 1) % config['image_save_iter'] == 0 and False:
             with torch.no_grad():
                 test_image_outputs = trainer.sample(test_display_images_a, test_display_images_b)
                 train_image_outputs = trainer.sample(train_display_images_a, train_display_images_b)
@@ -82,7 +83,7 @@ while True:
             # HTML
             write_html(output_directory + "/index.html", iterations + 1, config['image_save_iter'], 'images')
 
-        if (iterations + 1) % config['image_display_iter'] == 0:
+        if (iterations + 1) % config['image_display_iter'] == 0 and False:
             with torch.no_grad():
                 image_outputs = trainer.sample(train_display_images_a, train_display_images_b)
             write_2images(image_outputs, display_size, image_directory, 'train_current')

@@ -34,7 +34,7 @@ class MsImageDis(nn.Module):
         self.num_scales = params['num_scales']
         self.pad_type = params['pad_type']
         self.input_dim = input_dim
-        self.downsample = nn.AvgPool3d(3, stride=2, padding=[1, 1,1], count_include_pad=False)
+        self.downsample = nn.AvgPool3d(3, stride=[1,2,2], padding=[1, 1,1], count_include_pad=False)
         self.cnns = nn.ModuleList()
         for _ in range(self.num_scales):
             self.cnns.append(self._make_net())
@@ -42,6 +42,7 @@ class MsImageDis(nn.Module):
     def _make_net(self):
         dim = self.dim
         cnn_x = []
+        #input_dim ,output_dim, kernel_size, stride,padding=0, norm='none', activation='relu', pad_type='zero'
         cnn_x += [Conv3dBlock(self.input_dim, dim, 4, 2, 1, norm='none', activation=self.activ, pad_type=self.pad_type)]
         for i in range(self.n_layer - 1):
             cnn_x += [Conv3dBlock(dim, dim * 2, 4, 2, 1, norm=self.norm, activation=self.activ, pad_type=self.pad_type)]
@@ -53,8 +54,10 @@ class MsImageDis(nn.Module):
     def forward(self, x):
         outputs = []
         for model in self.cnns:
+
             outputs.append(model(x))
             x = self.downsample(x)
+
         return outputs
 
     def calc_dis_loss(self, input_fake, input_real):
@@ -217,7 +220,8 @@ class ContentEncoder(nn.Module):
         self.model += [Conv3dBlock(input_dim, dim, 7, 1, 3, norm=norm, activation=activ, pad_type=pad_type)]
         # downsampling blocks
         for i in range(n_downsample):
-            self.model += [Conv3dBlock(dim, dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+            self.model += [Conv3dBlock(dim, dim*2, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+            dim=dim*2
 
         # residual blocks
         self.model += [ResBlocks(n_res, dim, norm=norm, activation=activ, pad_type=pad_type)]

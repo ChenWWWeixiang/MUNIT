@@ -68,9 +68,9 @@ class MUNIT_Trainer(nn.Module):
         self.gen_opt.zero_grad()
         s_a = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
         s_b = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
-        # encode
+        # encode #gen_b have trouble
         c_a, s_a_prime = self.gen_a.encode(x_a)
-        c_b, s_b_prime = self.gen_b.encode(x_b)
+        c_b, s_b_prime = self.gen_b.encode(x_b)#produce nan c_b
         # decode (within domain)
         x_a_recon = self.gen_a.decode(c_a, s_a_prime)
         x_b_recon = self.gen_b.decode(c_b, s_b_prime)
@@ -79,7 +79,7 @@ class MUNIT_Trainer(nn.Module):
         x_ab = self.gen_b.decode(c_a, s_b)
         # encode again
         c_b_recon, s_a_recon = self.gen_a.encode(x_ba)
-        c_a_recon, s_b_recon = self.gen_b.encode(x_ab)
+        c_a_recon, s_b_recon = self.gen_b.encode(x_ab)#produce nan c_a_recon
         # decode again (if needed)
         x_aba = self.gen_a.decode(c_a_recon, s_a_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
         x_bab = self.gen_b.decode(c_b_recon, s_b_prime) if hyperparameters['recon_x_cyc_w'] > 0 else None
@@ -89,8 +89,8 @@ class MUNIT_Trainer(nn.Module):
         self.loss_gen_recon_x_b = self.recon_criterion(x_b_recon, x_b)
         self.loss_gen_recon_s_a = self.recon_criterion(s_a_recon, s_a)
         self.loss_gen_recon_s_b = self.recon_criterion(s_b_recon, s_b)
-        self.loss_gen_recon_c_a = self.recon_criterion(c_a_recon, c_a)
-        self.loss_gen_recon_c_b = self.recon_criterion(c_b_recon, c_b)
+        self.loss_gen_recon_c_a = self.recon_criterion(c_a_recon, c_a)#c_a_recon
+        self.loss_gen_recon_c_b = self.recon_criterion(c_b_recon, c_b)#c_b
         self.loss_gen_cycrecon_x_a = self.recon_criterion(x_aba, x_a) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         self.loss_gen_cycrecon_x_b = self.recon_criterion(x_bab, x_b) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         # GAN loss
@@ -114,6 +114,7 @@ class MUNIT_Trainer(nn.Module):
                               hyperparameters['vgg_w'] * self.loss_gen_vgg_b
         self.loss_gen_total.backward()
         self.gen_opt.step()
+        print(self.loss_gen_total)
 
     def compute_vgg_loss(self, vgg, img, target):
         img_vgg = vgg_preprocess(img)
