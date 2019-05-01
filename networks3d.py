@@ -34,7 +34,7 @@ class MsImageDis(nn.Module):
         self.num_scales = params['num_scales']
         self.pad_type = params['pad_type']
         self.input_dim = input_dim
-        self.downsample = nn.AvgPool3d(3, stride=2, padding=[1, 1], count_include_pad=False)
+        self.downsample = nn.AvgPool3d(3, stride=2, padding=[1, 1,1], count_include_pad=False)
         self.cnns = nn.ModuleList()
         for _ in range(self.num_scales):
             self.cnns.append(self._make_net())

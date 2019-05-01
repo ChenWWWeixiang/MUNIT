@@ -8,7 +8,7 @@ from networks import Vgg16
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
 from torchvision import transforms
-from data import ImageFilelist, ImageFolder
+from data import ImageFilelist, ImageFolder,mha_loader
 import torch
 import torch.nn as nn
 import os
@@ -17,7 +17,7 @@ import torchvision.utils as vutils
 import yaml
 import numpy as np
 import torch.nn.init as init
-import time
+import time,numbers,random
 # Methods
 # get_all_data_loaders      : primary data loader interface (load trainA, testA, trainB, testB)
 # get_data_loader_list      : list-based data loader
@@ -48,16 +48,17 @@ def get_all_data_loaders(conf):
         new_size_b = conf['new_size_b']
     height = conf['crop_image_height']
     width = conf['crop_image_width']
+    zheight = conf['zheight']
 
     if 'data_root' in conf:
         train_loader_a = get_data_loader_folder(os.path.join(conf['data_root'], 'trainA'), batch_size, True,
-                                              new_size_a, height, width, num_workers, True)
+                                              new_size_a, height, width, num_workers, True,zheight)
         test_loader_a = get_data_loader_folder(os.path.join(conf['data_root'], 'testA'), batch_size, False,
-                                             new_size_a, new_size_a, new_size_a, num_workers, True)
+                                             new_size_a, new_size_a, new_size_a, num_workers, True,zheight)
         train_loader_b = get_data_loader_folder(os.path.join(conf['data_root'], 'trainB'), batch_size, True,
-                                              new_size_b, height, width, num_workers, True)
+                                              new_size_b, height, width, num_workers, True,zheight)
         test_loader_b = get_data_loader_folder(os.path.join(conf['data_root'], 'testB'), batch_size, False,
-                                             new_size_b, new_size_b, new_size_b, num_workers, True)
+                                             new_size_b, new_size_b, new_size_b, num_workers, True,zheight)
     else:
         train_loader_a = get_data_loader_list(conf['data_folder_train_a'], conf['data_list_train_a'], batch_size, True,
                                                 new_size_a, height, width, num_workers, True)
@@ -84,18 +85,17 @@ def get_data_loader_list(root, file_list, batch_size, train, new_size=None,
     return loader
 
 def get_data_loader_folder(input_folder, batch_size, train, new_size=None,
-                           height=256, width=256, num_workers=4, crop=True):
-    transform_list = [transforms.ToTensor(),
-                      transforms.Normalize((0.5, 0.5, 0.5),
-                                           (0.5, 0.5, 0.5))]
-    transform_list = [transforms.RandomCrop((height, width))] + transform_list if crop else transform_list
-    transform_list = [transforms.Resize(new_size)] + transform_list if new_size is not None else transform_list
-    transform_list = [transforms.RandomHorizontalFlip()] + transform_list if train else transform_list
+                           height=256, width=256, num_workers=4, crop=True,zheight=80,new_size_z=32):
+    transform_list = [torch.Tensor()]
+                     # transforms.Normalize((0.5, 0.5, 0.5),
+                      #                     (0.5, 0.5, 0.5))]
+    #transform_list = [((zheight,height, width))] + transform_list if crop else transform_list
+    #transform_list = [transforms.Resize(new_size)] + transform_list if new_size is not None else transform_list
+    #transform_list = [transforms.RandomHorizontalFlip()] + transform_list if train else transform_list
     transform = transforms.Compose(transform_list)
-    dataset = ImageFolder(input_folder, transform=transform)
+    dataset = ImageFolder(input_folder, transform=transform,loader=mha_loader,sizes=[zheight,height,width,new_size,new_size_z])
     loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=train, drop_last=True, num_workers=num_workers)
     return loader
-
 
 def get_config(config):
     with open(config, 'r') as stream:
