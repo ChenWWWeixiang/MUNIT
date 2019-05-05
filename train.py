@@ -2,6 +2,8 @@
 Copyright (C) 2018 NVIDIA Corporation.  All rights reserved.
 Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 """
+import os
+os.environ['CUDA_VISIBLE_DEVICES']='0'
 from utils import get_all_data_loaders, prepare_sub_folder, write_html, write_loss, get_config, write_2images, Timer
 import argparse
 from torch.autograd import Variable
@@ -12,15 +14,15 @@ try:
     from itertools import izip as zip
 except ImportError: # will be 3.x series
     pass
-import os
+
 import sys
 import tensorboardX
 import shutil
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config', type=str, default='configs/test_pan.yaml', help='Path to the config file.')
+parser.add_argument('--config', type=str, default='configs/test_pan_bigmap.yaml', help='Path to the config file.')
 parser.add_argument('--output_path', type=str, default='.', help="outputs path")
-parser.add_argument("--resume", action="store_true")
+parser.add_argument("--resume", default=False,action="store_true")
 parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
 
 opts = parser.parse_args()
@@ -74,7 +76,7 @@ while True:
 
 
         # Write images
-        if (iterations + 1) % config['image_save_iter'] == 0 and False:
+        if (iterations + 1) % config['image_save_iter'] == 0:
             with torch.no_grad():
                 test_image_outputs = trainer.sample(test_display_images_a, test_display_images_b)
                 train_image_outputs = trainer.sample(train_display_images_a, train_display_images_b)
@@ -83,7 +85,7 @@ while True:
             # HTML
             write_html(output_directory + "/index.html", iterations + 1, config['image_save_iter'], 'images')
 
-        if (iterations + 1) % config['image_display_iter'] == 0 and False:
+        if (iterations + 1) % config['image_display_iter'] == 0:
             with torch.no_grad():
                 image_outputs = trainer.sample(train_display_images_a, train_display_images_b)
             write_2images(image_outputs, display_size, image_directory, 'train_current')

@@ -54,20 +54,20 @@ def get_all_data_loaders(conf):
         train_loader_a = get_data_loader_folder(os.path.join(conf['data_root'], 'trainA'), batch_size, True,
                                               new_size_a, height, width, num_workers, True,zheight)
         test_loader_a = get_data_loader_folder(os.path.join(conf['data_root'], 'testA'), batch_size, False,
-                                             new_size_a, new_size_a, new_size_a, num_workers, True,zheight)
+                                             new_size_a, height, width, num_workers, True,zheight)
         train_loader_b = get_data_loader_folder(os.path.join(conf['data_root'], 'trainB'), batch_size, True,
                                               new_size_b, height, width, num_workers, True,zheight)
         test_loader_b = get_data_loader_folder(os.path.join(conf['data_root'], 'testB'), batch_size, False,
-                                             new_size_b, new_size_b, new_size_b, num_workers, True,zheight)
+                                             new_size_b, height, width, num_workers, True,zheight)
     else:
         train_loader_a = get_data_loader_list(conf['data_folder_train_a'], conf['data_list_train_a'], batch_size, True,
                                                 new_size_a, height, width, num_workers, True)
         test_loader_a = get_data_loader_list(conf['data_folder_test_a'], conf['data_list_test_a'], batch_size, False,
-                                                new_size_a, new_size_a, new_size_a, num_workers, True)
+                                                new_size_a, height, width, num_workers, True)
         train_loader_b = get_data_loader_list(conf['data_folder_train_b'], conf['data_list_train_b'], batch_size, True,
                                                 new_size_b, height, width, num_workers, True)
         test_loader_b = get_data_loader_list(conf['data_folder_test_b'], conf['data_list_test_b'], batch_size, False,
-                                                new_size_b, new_size_b, new_size_b, num_workers, True)
+                                                new_size_b, height, width, num_workers, True)
     return train_loader_a, train_loader_b, test_loader_a, test_loader_b
 
 

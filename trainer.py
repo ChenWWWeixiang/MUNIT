@@ -114,7 +114,6 @@ class MUNIT_Trainer(nn.Module):
                               hyperparameters['vgg_w'] * self.loss_gen_vgg_b
         self.loss_gen_total.backward()
         self.gen_opt.step()
-        print(self.loss_gen_total)
 
     def compute_vgg_loss(self, vgg, img, target):
         img_vgg = vgg_preprocess(img)

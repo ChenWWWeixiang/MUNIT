@@ -5,6 +5,7 @@ Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses
 import torch.utils.data as data
 import os.path
 import SimpleITK as sitk
+import torchvision.utils as vutils
 def default_loader(path):
     return Image.open(path).convert('RGB')
 
@@ -73,11 +74,12 @@ class ImageLabelFilelist(data.Dataset):
 ###############################################################################
 
 import torch.utils.data as data
-
+from skimage.transform import resize
 from PIL import Image
 import os,random,torch
 import os.path
 import numpy as np
+
 
 IMG_EXTENSIONS = [
     '.jpg', '.JPG', '.jpeg', '.JPEG',
@@ -122,35 +124,48 @@ class ImageFolder(data.Dataset):
     def __getitem__(self, index):
         path = self.imgs[index]
         img = self.loader(path)
+        valid_range=np.where(img>10)
+        valid_range=[[min(xx),max(xx)] for xx in valid_range]
         if self.transform is not None:
-            img[img<-0]=0
-            img[img>2500]=2500
-            img=(img)*1.0/2500
-            img=self._randomcrop(img)
-            img=np.resize(img,(self.newz,self.newl,self.newl))
+            img=self._randomcrop(img,valid_range)
+            img = resize(img, ( self.newz,self.newl, self.newl), order=1, mode='edge',
+                                 cval=0, clip=True, preserve_range=True)
             img=img[np.newaxis,:,:,:]
+            img[img<-0]=0
+            img[img>2000]=2000
+            img=(img)*1.0/2000
             img = torch.Tensor(img)
+            #self.__write_images([img],1, '/home/data1/MUNIT/tmptest.jpg')
+
         if self.return_paths:
             return img, path
         else:
             return img
 
+    def __write_images(self,image_outputs, display_image_num, file_name):
+        image_outputs = [images[:, 16, :, :].expand( 3, -1, -1) for images in
+                         image_outputs]  # expand gray-scale images to 3 channels
+        image_tensor = torch.cat([images[:display_image_num] for images in image_outputs], 0)
+        image_grid = vutils.make_grid(image_tensor.data, nrow=display_image_num, padding=0, normalize=True)
+        vutils.save_image(image_grid, file_name, nrow=1)
     def __len__(self):
         return len(self.imgs)
-    def _randomcrop(self,imgs):
-        sizez,sizew,sizeh=imgs.shape
+    def _randomcrop(self,imgs,valid_range):
+        sizez=valid_range[0][1]-valid_range[0][0]
+        sizew = valid_range[1][1] - valid_range[1][0]
+        sizeh = valid_range[2][1] - valid_range[2][0]
         if sizez>self.zl:
-            z=random.randint(0,sizez-self.zl)
+            z=random.randint(valid_range[0][0],valid_range[0][1]-self.zl)
         else:
-            z=0
+            z=valid_range[0][0]
         if sizew>self.wl:
-            x=random.randint(0,sizew-self.wl)
+            x=random.randint(valid_range[1][0],valid_range[1][1]-self.wl)
         else:
-            x=0
+            x=valid_range[1][0]
         if sizeh > self.hl:
-            y=random.randint(0,sizeh-self.hl)
+            y=random.randint(valid_range[2][0],valid_range[2][1]-self.hl)
         else:
-            y=0
+            y=valid_range[2][0]
         cropimg=imgs[z:z+self.zl,x:x+self.wl,y:y+self.hl]
         now_size=cropimg.shape
         padding=np.array((self.zl,self.wl,self.hl))-np.array(now_size)
