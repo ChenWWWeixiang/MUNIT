@@ -13,9 +13,79 @@ except ImportError: # will be 3.x series
 ##################################################################################
 # Register
 ##################################################################################
-class LatentRegister(nn.Module):##TODO
-    def __init__(self):
+class LatentRegister(nn.Module):
+    def __init__(self,latent_channel_dim,nf_cod=[16,32,32],nf_dec=[32,16,16,3]):
         super(LatentRegister, self).__init__()
+
+        #input_dim ,output_dim, kernel_size, stride,padding=0
+        self.down_conv0 = myConv3DBlock(latent_channel_dim, nf_cod[0], 'same')
+        self.down_conv1 = myConv3DBlock(nf_cod[0], nf_cod[1], 'down')
+        self.down_conv2 = myConv3DBlock(nf_cod[1], nf_cod[2], 'down')
+
+
+        self.up_conv0 = myConv3DBlock(nf_cod[2], nf_dec[0], 'up')
+        self.up_conv1 = myConv3DBlock(nf_dec[0] + nf_cod[1], nf_dec[1], 'up')
+        self.up_conv2 = myConv3DBlock(nf_dec[1] + nf_cod[0], nf_dec[2], 'up')
+        self.up_conv3 = myConv3DBlock(nf_dec[2], nf_dec[3], 'up')
+
+    def encode(self, x):
+        # pdb.set_trace()
+        self.down0 = self.down_conv0(x)
+        self.down1 = self.down_conv1(self.down0)
+        self.down2 = self.down_conv2(self.down1)
+
+        return self.down2
+
+    def decode(self):
+        # use transposed convolution instead of non-parametric upsampling
+        self.up0 = self.up_conv0(self.down2)
+        self.up1 = self.up_conv1(torch.cat((self.up0, self.down1), dim=1))
+        self.up2 = self.up_conv2(torch.cat((self.up1, self.down0), dim=1))
+        self.up3=self.up_conv3(self.up2 )
+        return self.up3
+
+    def forward(self, input):
+        self.encode(input)
+        disp = self.decode()
+        return disp
+class myConv3DBlock(nn.Module):
+    '''
+    three button:
+        shape: 'up' 'down' 'same'
+        Use GN:
+        is_flow:
+    total struc:
+        Block = conv(stride? careful init?) + act + upsample(?) + norm(GN?)
+    '''
+    def __init__(self,in_c,out_c,sp_shape,use_GN=False,is_flow=False,bigkernal=False):
+        super(myConv3DBlock,self).__init__()
+        self.use_GN = use_GN
+        self.sp_shape = sp_shape
+        self.is_flow = is_flow
+        stride = 2 if sp_shape=='down' else 1
+        if bigkernal:
+            self.conv_layer = nn.Conv3d(in_c, out_c, kernel_size=7, stride=stride, padding=1)
+        else:
+            self.conv_layer = nn.Conv3d(in_c,out_c,kernel_size=3,stride=stride,padding=1)
+        self.act_layer =  nn.LeakyReLU(0.2, inplace=True)
+        if use_GN:
+            self.norm_layer = nn.GroupNorm(num_groups=16,num_channels=out_c)
+        if is_flow:
+            nn.init.normal_(self.conv_layer.weight,mean=0,std=1e-5)
+        else:
+            nn.init.kaiming_normal_(self.conv_layer.weight)
+
+
+    def forward(self,x):
+        x1 = self.conv_layer(x)
+        x2 = self.act_layer(x1)
+        if self.sp_shape=='up':
+            x2 = F.interpolate(x2,scale_factor=2)
+        if self.use_GN:
+            x3 = self.norm_layer(x2)
+        else:
+            x3 = x2
+        return x3 if not self.is_flow else x1
 
 
 ##################################################################################
@@ -107,12 +177,12 @@ class AdaINGen(nn.Module):
         activ = params['activ']
         pad_type = params['pad_type']
         mlp_dim = params['mlp_dim']
-
+        growth=params['growth']
         # style encoder
-        self.enc_style = StyleEncoder(3, input_dim, dim, style_dim, norm='none', activ=activ, pad_type=pad_type)
+        self.enc_style = StyleEncoder(3, input_dim, dim, style_dim, norm='none', activ=activ, pad_type=pad_type,growth=growth)
 
         # content encoder
-        self.enc_content = ContentEncoder(n_downsample, n_res, input_dim, dim, 'in', activ, pad_type=pad_type)
+        self.enc_content = ContentEncoder(n_downsample, n_res, input_dim, dim, 'in', activ, pad_type=pad_type,growth=growth)
         self.dec = Decoder(n_downsample, n_res, self.enc_content.output_dim, input_dim, res_norm='adain', activ=activ, pad_type=pad_type)
 
         # MLP to generate AdaIN parameters
@@ -196,13 +266,16 @@ class VAEGen(nn.Module):
 ##################################################################################
 
 class StyleEncoder(nn.Module):
-    def __init__(self, n_downsample, input_dim, dim, style_dim, norm, activ, pad_type):
+    def __init__(self, n_downsample, input_dim, dim, style_dim, norm, activ, pad_type,growth=True):
         super(StyleEncoder, self).__init__()
         self.model = []
         self.model += [Conv3dBlock(input_dim, dim, 7, 1, 3, norm=norm, activation=activ, pad_type=pad_type)]
         for i in range(2):
-            self.model += [Conv3dBlock(dim, 2 * dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
-            dim *= 2
+            if growth:
+                self.model += [Conv3dBlock(dim, 2 * dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+                dim *= 2
+            else:
+                self.model += [Conv3dBlock(dim, dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
         for i in range(n_downsample - 2):
             self.model += [Conv3dBlock(dim, dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
         self.model += [nn.AdaptiveAvgPool3d(1)] # global average pooling
@@ -214,14 +287,18 @@ class StyleEncoder(nn.Module):
         return self.model(x)
 
 class ContentEncoder(nn.Module):
-    def __init__(self, n_downsample, n_res, input_dim, dim, norm, activ, pad_type):
+    def __init__(self, n_downsample, n_res, input_dim, dim, norm, activ, pad_type,growth=True):
         super(ContentEncoder, self).__init__()
         self.model = []
         self.model += [Conv3dBlock(input_dim, dim, 7, 1, 3, norm=norm, activation=activ, pad_type=pad_type)]
         # downsampling blocks
         for i in range(n_downsample):
-            self.model += [Conv3dBlock(dim, dim*2, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
-            dim=dim*2
+            if growth:
+                self.model += [Conv3dBlock(dim, 2*dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+                dim=2*dim
+            else:
+                self.model += [Conv3dBlock(dim, dim, 4, 2, 1, norm=norm, activation=activ, pad_type=pad_type)]
+
 
         # residual blocks
         self.model += [ResBlocks(n_res, dim, norm=norm, activation=activ, pad_type=pad_type)]
@@ -398,10 +475,132 @@ class LinearBlock(nn.Module):
             out = self.activation(out)
         return out
 
-class TransformLayer(nn.Module):##TODO
+class TransformLayer(nn.Module):
     def __init__(self):
         super(TransformLayer,self).__init__()
 
+    def forward(self, src, disp_field):
+        return self._transform(src, disp_field[:, 0, :, :, :], disp_field[:, 1, :, :, :], disp_field[:, 2, :, :, :])
+
+    def _transform(self, I, dx, dy, dz):
+        dim_lens = list(I.size())
+        batch_size = dim_lens[0]
+        height = dim_lens[2]
+        width = dim_lens[3]
+        depth = dim_lens[4]
+
+        ##make standard x,y,z mesh
+        y_mesh, x_mesh, z_mesh = torch.meshgrid(
+            [torch.arange(0, height), torch.arange(0, width), torch.arange(0, depth)])
+        x_mesh = x_mesh.cuda()
+        y_mesh = y_mesh.cuda()
+        z_mesh = z_mesh.cuda()
+        x_mesh, y_mesh, z_mesh = x_mesh.unsqueeze(0), y_mesh.unsqueeze(0), z_mesh.unsqueeze(0)
+        x_mesh, y_mesh, z_mesh = x_mesh.repeat([batch_size, 1, 1, 1]), y_mesh.repeat(
+            [batch_size, 1, 1, 1]), z_mesh.repeat([batch_size, 1, 1, 1])
+        x_new = dx + x_mesh.float()
+        y_new = dy + y_mesh.float()
+        z_new = dz + z_mesh.float()
+        ##get interpolate I with x_new, y_new , z_new
+        return self._interpolate(I, x_new, y_new, z_new)
+
+    def _interpolate(self, im, x, y, z):
+        Padder = nn.ConstantPad3d(1, 0).cuda()
+        im = Padder(im)
+        # node = im
+        num_batch = im.size()[0]
+        channels = im.size()[1]
+        height = im.size()[2]
+        width = im.size()[3]
+        depth = im.size()[4]
+
+        out_height = x.size()[1]
+        out_width = x.size()[2]
+        out_depth = x.size()[3]
+
+        x = x.contiguous().view(-1)
+        y = y.contiguous().view(-1)
+        z = z.contiguous().view(-1)
+        x = x.float() + 1
+        y = y.float() + 1
+        z = z.float() + 1
+
+        # node =x
+        max_x = (width - 1)
+        max_y = (height - 1)
+        max_z = (depth - 1)
+
+        x0 = torch.floor(x).int()
+        x1 = x0 + 1
+        y0 = torch.floor(y).int()
+        y1 = y0 + 1
+        z0 = torch.floor(z).int()
+        z1 = z0 + 1
+
+        x0 = torch.clamp(x0, 0, max_x)
+        x1 = torch.clamp(x1, 0, max_x)
+        y0 = torch.clamp(y0, 0, max_y)
+        y1 = torch.clamp(y1, 0, max_y)
+        z0 = torch.clamp(z0, 0, max_z)
+        z1 = torch.clamp(z1, 0, max_z)
+
+        dim3 = depth
+        dim2 = depth * width
+        dim1 = depth * width * height
+
+        # node = y1
+        base_from = torch.arange(0, num_batch) * dim1
+        repeat_times = out_height * out_width * out_depth
+        base = base_from.contiguous().view(-1, 1).expand(-1, repeat_times).contiguous().view(-1).cuda()
+        # node = base
+
+        base_y0 = base + (y0 * dim2).type(torch.int64)
+        base_y1 = base + (y1 * dim2).type(torch.int64)
+
+        idx_a = base_y0 + (x0 * dim3).type(torch.int64) + z0.type(torch.int64)  # .view(-1,1)
+        idx_b = base_y1 + (x0 * dim3).type(torch.int64) + z0.type(torch.int64)  # .view(-1,1)
+        idx_c = base_y0 + (x1 * dim3).type(torch.int64) + z0.type(torch.int64)  # .view(-1,1)
+        idx_d = base_y1 + (x1 * dim3).type(torch.int64) + z0.type(torch.int64)  # .view(-1,1)
+        idx_e = base_y0 + (x0 * dim3).type(torch.int64) + z1.type(torch.int64)  # .view(-1,1)
+        idx_f = base_y1 + (x0 * dim3).type(torch.int64) + z1.type(torch.int64)  # .view(-1,1)
+        idx_g = base_y0 + (x1 * dim3).type(torch.int64) + z1.type(torch.int64)  # .view(-1,1)
+        idx_h = base_y1 + (x1 * dim3).type(torch.int64) + z1.type(torch.int64)  # .view(-1,1)
+        # node = idx_h
+        # I_pad: N C H W D: should permute to tensorflow shape
+        im_flat = im.permute(0, 2, 3, 4, 1).contiguous().view(-1, channels).float()
+        # node = im_flat
+        temp = idx_a.unsqueeze(1)
+        Ia = torch.gather(im_flat, 0, idx_a.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        Ib = torch.gather(im_flat, 0, idx_b.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        Ic = torch.gather(im_flat, 0, idx_c.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        Id = torch.gather(im_flat, 0, idx_d.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        Ie = torch.gather(im_flat, 0, idx_e.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        If = torch.gather(im_flat, 0, idx_f.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        Ig = torch.gather(im_flat, 0, idx_g.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        Ih = torch.gather(im_flat, 0, idx_h.type(torch.int64).unsqueeze(1).expand(-1, channels))
+        # node = Ih
+
+        x1_f = x1.float()
+        y1_f = y1.float()
+        z1_f = z1.float()
+
+        dx = x1_f - x
+        dy = y1_f - y
+        dz = z1_f - z
+
+        wa = (dz * dx * dy).unsqueeze(1)
+        wb = (dz * dx * (1 - dy)).unsqueeze(1)
+        wc = (dz * (1 - dx) * dy).unsqueeze(1)
+        wd = (dz * (1 - dx) * (1 - dy)).unsqueeze(1)
+        we = ((1 - dz) * dx * dy).unsqueeze(1)
+        wf = ((1 - dz) * dx * (1 - dy)).unsqueeze(1)
+        wg = ((1 - dz) * (1 - dx) * dy).unsqueeze(1)
+        wh = ((1 - dz) * (1 - dx) * (1 - dy)).unsqueeze(1)
+
+        output = wa * Ia + wb * Ib + wc * Ic + wd * Id + we * Ie + wf * If + wg * Ig + wh * Ih
+        output = output.contiguous().view(-1, channels, out_height, out_width, out_depth)
+
+        return output
 ##################################################################################
 # VGG network definition
 ##################################################################################

@@ -3,7 +3,7 @@ Copyright (C) 2018 NVIDIA Corporation.  All rights reserved.
 Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 """
 import os
-os.environ['CUDA_VISIBLE_DEVICES']='0'
+os.environ['CUDA_VISIBLE_DEVICES']='3'
 from utils import get_all_data_loaders, prepare_sub_folder, write_html, write_loss, get_config, write_2images, Timer
 import argparse
 from torch.autograd import Variable
@@ -20,9 +20,9 @@ import tensorboardX
 import shutil
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config', type=str, default='configs/test_pan_bigmap.yaml', help='Path to the config file.')
+parser.add_argument('--config', type=str, default='configs/test_pan.yaml', help='Path to the config file.')
 parser.add_argument('--output_path', type=str, default='.', help="outputs path")
-parser.add_argument("--resume", default=False,action="store_true")
+parser.add_argument("--resume", default=True,action="store_true")
 parser.add_argument('--trainer', type=str, default='MUNIT', help="MUNIT|UNIT")
 
 opts = parser.parse_args()
@@ -67,6 +67,7 @@ while True:
             # Main training code
             trainer.dis_update(images_a, images_b, config)
             trainer.gen_update(images_a, images_b, config)
+            trainer.reg_update(images_a, images_b, config)
             torch.cuda.synchronize()
 
         # Dump training stats in log file

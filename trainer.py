@@ -2,7 +2,7 @@
 Copyright (C) 2017 NVIDIA Corporation.  All rights reserved.
 Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 """
-from networks3d import AdaINGen, MsImageDis, VAEGen
+from networks3d import AdaINGen, MsImageDis, VAEGen,LatentRegister,TransformLayer
 from utils import weights_init, get_model_list, vgg_preprocess, load_vgg16, get_scheduler
 from torch.autograd import Variable
 import torch
@@ -16,11 +16,12 @@ class MUNIT_Trainer(nn.Module):
         # Initiate the networks
         self.gen_a = AdaINGen(hyperparameters['input_dim_a'], hyperparameters['gen'])  # auto-encoder for domain a
         self.gen_b = AdaINGen(hyperparameters['input_dim_b'], hyperparameters['gen'])  # auto-encoder for domain b
+        self.reg=LatentRegister(256)
         self.dis_a = MsImageDis(hyperparameters['input_dim_a'], hyperparameters['dis'])  # discriminator for domain a
         self.dis_b = MsImageDis(hyperparameters['input_dim_b'], hyperparameters['dis'])  # discriminator for domain b
         self.instancenorm = nn.InstanceNorm3d(512, affine=False)
         self.style_dim = hyperparameters['gen']['style_dim']
-
+        self.uper=torch.nn.Upsample(scale_factor=4)
         # fix the noise used in sampling
         display_size = int(hyperparameters['display_size'])
         self.s_a = torch.randn(display_size, self.style_dim, 1, 1).cuda()
@@ -31,9 +32,12 @@ class MUNIT_Trainer(nn.Module):
         beta2 = hyperparameters['beta2']
         dis_params = list(self.dis_a.parameters()) + list(self.dis_b.parameters())
         gen_params = list(self.gen_a.parameters()) + list(self.gen_b.parameters())
+        reg_params = list(self.reg.parameters())
         self.dis_opt = torch.optim.Adam([p for p in dis_params if p.requires_grad],
                                         lr=lr, betas=(beta1, beta2), weight_decay=hyperparameters['weight_decay'])
         self.gen_opt = torch.optim.Adam([p for p in gen_params if p.requires_grad],
+                                        lr=lr, betas=(beta1, beta2), weight_decay=hyperparameters['weight_decay'])
+        self.reg_opt = torch.optim.Adam([p for p in reg_params if p.requires_grad],
                                         lr=lr, betas=(beta1, beta2), weight_decay=hyperparameters['weight_decay'])
         self.dis_scheduler = get_scheduler(self.dis_opt, hyperparameters)
         self.gen_scheduler = get_scheduler(self.gen_opt, hyperparameters)
@@ -42,7 +46,7 @@ class MUNIT_Trainer(nn.Module):
         self.apply(weights_init(hyperparameters['init']))
         self.dis_a.apply(weights_init('gaussian'))
         self.dis_b.apply(weights_init('gaussian'))
-
+        self.trans=TransformLayer()
         # Load VGG model if needed
         if 'vgg_w' in hyperparameters.keys() and hyperparameters['vgg_w'] > 0:
             self.vgg = load_vgg16(hyperparameters['vgg_model_path'] + '/models')
@@ -63,6 +67,25 @@ class MUNIT_Trainer(nn.Module):
         x_ab = self.gen_b.decode(c_a, s_b)
         self.train()
         return x_ab, x_ba
+    def reg_update(self,x_a,x_b,hyperparameters):
+        self.reg_opt.zero_grad()
+
+        # encode #gen_b have trouble
+        c_a, s_a_prime = self.gen_a.encode(x_a)
+        c_b, s_b_prime = self.gen_b.encode(x_b)  # produce nan c_b
+        # decode (within domain)
+        content=torch.cat([c_a,c_b],1)
+        dis=self.reg(content)
+        dis_a=self.trans(x_a,dis)
+        dis_c_a, dis_s_a_prime = self.gen_a.encode(dis_a)
+
+        self.reg_c = self.recon_criterion(dis_c_a, c_b)
+        self.reg_s_a = self.recon_criterion(dis_s_a_prime, s_a_prime)
+        self.loss_reg_total = hyperparameters['reg_s_w'] * self.reg_s_a + \
+                              hyperparameters['reg_c_w'] * self.reg_c
+
+        self.loss_reg_total.backward()
+        self.reg_opt.step()
 
     def gen_update(self, x_a, x_b, hyperparameters):
         self.gen_opt.zero_grad()
@@ -87,10 +110,10 @@ class MUNIT_Trainer(nn.Module):
         # reconstruction loss
         self.loss_gen_recon_x_a = self.recon_criterion(x_a_recon, x_a)
         self.loss_gen_recon_x_b = self.recon_criterion(x_b_recon, x_b)
-        self.loss_gen_recon_s_a = self.recon_criterion(s_a_recon, s_a)
-        self.loss_gen_recon_s_b = self.recon_criterion(s_b_recon, s_b)
-        self.loss_gen_recon_c_a = self.recon_criterion(c_a_recon, c_a)#c_a_recon
-        self.loss_gen_recon_c_b = self.recon_criterion(c_b_recon, c_b)#c_b
+        self.loss_gen_recon_s_a = self.recon_criterion(s_a_recon, s_a_prime)
+        self.loss_gen_recon_s_b = self.recon_criterion(s_b_recon, s_b_prime)
+        self.loss_gen_recon_c_a = self.recon_criterion(c_a_recon, c_a)
+        self.loss_gen_recon_c_b = self.recon_criterion(c_b_recon, c_b)
         self.loss_gen_cycrecon_x_a = self.recon_criterion(x_aba, x_a) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         self.loss_gen_cycrecon_x_b = self.recon_criterion(x_bab, x_b) if hyperparameters['recon_x_cyc_w'] > 0 else 0
         # GAN loss
@@ -128,10 +151,13 @@ class MUNIT_Trainer(nn.Module):
         s_b1 = Variable(self.s_b)
         s_a2 = Variable(torch.randn(x_a.size(0), self.style_dim, 1, 1).cuda())
         s_b2 = Variable(torch.randn(x_b.size(0), self.style_dim, 1, 1).cuda())
-        x_a_recon, x_b_recon, x_ba1, x_ba2, x_ab1, x_ab2 = [], [], [], [], [], []
+        x_a_recon, x_b_recon, x_ba1, x_ba2, x_ab1, x_ab2,c_aa,c_bb = [], [], [], [], [], [],[],[]
         for i in range(x_a.size(0)):
             c_a, s_a_fake = self.gen_a.encode(x_a[i].unsqueeze(0))
             c_b, s_b_fake = self.gen_b.encode(x_b[i].unsqueeze(0))
+            c_aa.append(torch.mean(self.uper(c_a),1).unsqueeze(1))
+            c_bb.append(torch.mean(self.uper(c_b),1).unsqueeze(1))
+
             x_a_recon.append(self.gen_a.decode(c_a, s_a_fake))#a self
             x_b_recon.append(self.gen_b.decode(c_b, s_b_fake))#b self
             x_ba1.append(self.gen_a.decode(c_b, s_a1[i].unsqueeze(0)))# ramdon a
@@ -141,8 +167,9 @@ class MUNIT_Trainer(nn.Module):
         x_a_recon, x_b_recon = torch.cat(x_a_recon), torch.cat(x_b_recon)
         x_ba1, x_ba2 = torch.cat(x_ba1), torch.cat(x_ba2)
         x_ab1, x_ab2 = torch.cat(x_ab1), torch.cat(x_ab2)
+        c_aa,c_bb=torch.cat(c_aa),torch.cat(c_bb)
         self.train()
-        return x_a, x_a_recon, x_ab1, x_ab2, x_b, x_b_recon, x_ba1, x_ba2
+        return x_a, x_a_recon, x_ab1, x_ab2,c_aa, x_b, x_b_recon, x_ba1, x_ba2,c_bb
 
     def dis_update(self, x_a, x_b, hyperparameters):
         self.dis_opt.zero_grad()
